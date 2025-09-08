@@ -1,0 +1,244 @@
+---
+title: "Data mining+gisc Assignment2"
+author: "Wenjuan Wang, Chris Chang, Tom Waldin"
+date: "2025-08-30"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(GGally)
+library(ggplot2)
+library(MASS)
+library(caret)
+```
+
+# Question A. Automatically detecting seed types (Logistic Regression)
+
+## A.1 Load the datasets seeds_training.csv and seeds_test.csv. Since the class labels (the seed types) contain characters that R struggles with, encode the class features as a factor variable in both training and test set.  
+
+```{r}
+# Load the seeds training and testing csv files
+seeds_training <- read.csv("seeds_training.csv")
+seeds_testing <- read.csv("seeds_test.csv")
+
+# Set the levels for encoding
+levs <- c("Cercevelik", "Urgup Sivrisi")
+
+# Encode the 'Class' column into factors and store it in a new column 'Class_factor'
+seeds_training$Class_factor <- factor(seeds_training$Class, levels = levs)
+seeds_testing$Class_factor  <- factor(seeds_testing$Class,  levels = levs)
+
+# Output some information about the datasets
+cat("The dimensions of seeds_training are: ", dim(seeds_training), "\n")
+cat("The dimensions of seeds_testing are: ", dim(seeds_testing), "\n")
+cat("The two classes in seeds_training are: ", unique(seeds_training$Class), "\n")
+
+
+```
+
+
+
+## A.2 Fit a multiple logistic regression classifier using all of the features and record its accuracy on the test set.  
+
+```{r}
+# Fit a multiple logistic regression model
+# Not including the repeated column 'Class'
+m_logistic_model <- glm(Class_factor ~ . - Class, data = seeds_training, family = binomial)
+
+# Calculate the probability of Class '"Urgup Sivrisi"' 
+pred_prob <- predict(m_logistic_model, newdata = seeds_testing, type = "response")
+
+# According to the probability, assign the predicted class for each entry
+pred_classes <- ifelse(pred_prob >= 0.5, levs[2], levs[1])
+
+# Compute the accuracy on testing dataset
+accuracy <- mean(pred_classes == seeds_testing$Class_factor)
+paste("The accuracy on testing dataset is: ", round(accuracy,4))
+
+```
+
+Therefore, the accuracy predicted using the logistic model above based on the testing dataset is 0.874.  
+
+
+
+## A.3 Provide a confusion matrix for your model based on its predictions on the test set. Why does the concept of sensitivity and specificity not make a lot of sense here?
+
+```{r}
+# Compute the confusion matrix using the test dataset based on the predicted classes in A.2. 
+confusionMatrix(as.factor(pred_classes),as.factor(seeds_testing$Class_factor), 
+                positive = levs[2])
+
+```
+A confusion matrix for the model was generated based on its predictions on the test set.
+The concept of sensitivity and specificity do not make a lot of sense in this example. Neither seed is inherently positive or negative, each are just different varieties, and the choice of which seed being positive is arbitrary. Without further context it is unknown if one misclassification is more problematic than the other, and it is likely that it is equally important to classify each correctly. The accuracy is likely a better metric in this case.
+
+ 
+## A.4 Consulting the summary of your glm model, which three features are most significant?
+
+```{r}
+# Summarize the logistic model. 
+sum_model = summary(m_logistic_model)
+
+sum_model
+
+# Find the three most significant features with the lowest p-values in coefficients.
+coefs <- as.data.frame(sum_model$coefficients)
+coefs = coefs[rownames(coefs) != "(Intercept)", ,drop = FALSE]
+coefs = coefs["Pr(>|z|)"]
+top3_idx <- order(coefs[["Pr(>|z|)"]])[1:3]
+top3 <- coefs[top3_idx, , drop = FALSE]
+top3
+```
+
+According to the p-values in the summary, "Minor_Axis_Length", "Equiv_Diameter" and "Area" are the most significant because they have the lowest three p-values that are below 0.01.
+
+## A.5 Train another glm model, but this time using only the three most significant features from your first model run. Compute test set accuracy and a confusion matrix in the same way as for your first model and briefly compare the two models. Which model would you pick, and why?
+
+```{r}
+# Fit a multiple logistic regression model with only 3 predictors selected in A.4. 
+m_logistic_model_new <- glm(Class_factor ~ Area + Minor_Axis_Length + Equiv_Diameter, 
+                           data = seeds_training, family = binomial)
+summary(m_logistic_model_new)
+
+```
+
+```{r}
+# Calculate the probability of Class "Urgup Sivrisi" 
+pred_prob <- predict(m_logistic_model_new, newdata = seeds_testing, type = "response")
+
+# According to the probability, assign the predicted class for each entry
+pred_classes <- ifelse(pred_prob >= 0.5, levs[2], levs[1])
+
+# Accuracy: proportion of correct prediction
+accuracy <- mean(pred_classes == seeds_testing$Class_factor)
+paste("The accuracy on testing dataset is: ", round(accuracy,4))
+
+# Compute the confusion matrix for new model with 3 predictors
+confusionMatrix(as.factor(pred_classes),as.factor(seeds_testing$Class_factor), 
+                positive = levs[2])
+
+```
+
+
+Compared with the first model that uses all 12 variables, the second model attains slightly higher accuracy (0.878 vs 0.874) while using only one quarter as many predictors. Moreover, all three predictors in the second model are statistically significant. Therefore, I prefer the second model for its parsimony and marginally better accuracy. There is likely a model between these two, with more of the significant features, but not all features which may outperform both models that were considered.
+
+
+# Question B. Predicting color name from RGB values (Discriminant Analysis)
+
+## B.1.Load the dataset colors_train.csv. How many classes are there in the dataset?
+
+```{r}
+# Load colors_train.csv
+color_train <- read.csv("colors_train.csv")
+color_test <- read.csv("colors_test.csv")
+
+# There are three columns in the csv file and get the unique values in 'color' column
+uni_colors <- unique(color_train$color)
+uni_colors
+
+```
+There are a total of $`r length(uni_colors)`$ classes in the colors_train.csv.  
+
+Visualize the color_train dataset.  
+
+```{r}
+# Set the symbol of the points corresponding to 'color' attributes
+lvls <- c("blue","brown","pink","purple","red")        
+pal  <- c(blue="blue", brown="brown", pink="pink", purple="purple", red="red") 
+
+# Visualization 
+ggplot(data=color_train) +
+  geom_point(aes(x=r, y=b, color=color), alpha = 1) +
+  scale_colour_manual(values = pal, breaks = lvls, labels = lvls)
+```
+
+
+
+
+## B.2.Fit a QDA algorithm to this classification problem and compute the confusion matrix.
+
+```{r}
+# Fit the QDA model with train dataset
+# 'r' and 'b' are predictors while 'color' is the dependent variable.
+qda.fit <- qda(color ~ r + b, data = color_train)
+
+# Make predictions on the test dataset. 
+# Use $class to extract the predicted classes
+pred.qda.fit = predict(qda.fit, newdata = color_test)$class
+
+# Retrieve the actual colors in test dataset for comparison
+actual <- color_test$color
+
+# Make a confusion matrix to evaluate the model
+confusionMatrix(as.factor(pred.qda.fit), as.factor(actual))
+
+```
+The confusion matrix shows 95% overall accuracy (Kappa = 0.935). All errors occur in the purple class: 1 instance predicted as brown and 4 as pink. Misclassifications cluster near the purple–pink and purple–brown decision boundaries.
+
+## B.3.Visualise the decision boundaries in a suitable way.
+
+```{r}
+# Create a grid for interpolating the decision boundary.  
+# Compute a sequence of 300 numbers within the range of r and b, respectively
+r_seq <- seq(min(color_train$r), max(color_train$r), length.out = 300)
+b_seq <- seq(min(color_train$b), max(color_train$b), length.out = 300)
+grid <- expand.grid(r = r_seq, b = b_seq)
+
+# Use the QDA model fitted in B.2 to predict the color of each point.   
+prd <- predict(qda.fit, newdata = grid)
+
+# Store the predicted classes and corresponding posteriors in grid
+grid$pred <- factor(prd$class, levels = lvls)
+post <- as.data.frame(prd$posterior); names(post) <- lvls
+grid <- cbind(grid, post)
+
+# Visualize the points and filled color decision boundaries
+p <- ggplot() +
+  # Set the filled colors 
+  geom_raster(data = grid, aes(r, b, fill = pred), alpha = 0.25, interpolate = TRUE) +
+  scale_fill_manual(values = pal, name = "Predicted") +
+  # Add the observation points in train dataset
+  geom_point(data = color_test, aes(r, b, colour = color), size = 1.4) +
+  scale_colour_manual(values = pal, name = "Actual") +
+  coord_equal() + theme_minimal() +
+  # Set the title and its position in the middle
+  labs(title = "The QDA Decision Boundaries of the Classification Model", x = "r", y = "b") +
+  theme(plot.title = element_text(hjust = 0.5))  
+
+# Covert the predicted_id(the order in the color levels) into integer
+grid$pred_id <- as.integer(grid$pred)
+
+# Add the decision boundary lines
+p + stat_contour(
+  data = grid,
+  aes(r, b, z = pred_id),
+  # Add 0.5 to each classes for more appropriate match between the lines and filled color edges
+  breaks = seq(1.5, length(lvls) - 0.5, by = 1),  
+  colour = "black", linewidth = 0.2
+
+)
+```
+The QDA decision regions match the B.2 confusion matrix. Accuracy is high (95%), and most observations are correctly classified; the only errors are a few purple samples misclassified as pink or brown, mainly along the class boundaries.  
+
+## B.4.Test your algorithm on (200,0,200). What colour is this being called by your algorithm?  
+
+```{r}
+# Create a dataframe to store the test data 
+test <- data.frame(r = 200, b = 200)
+
+# Use the QDA model to predict the test data
+test_pre <- predict(qda.fit, newdata = test)
+
+# Output the predicted class.
+print(test_pre$class)
+
+# Output the posteriors of the test point(decending)
+sort(test_pre$posterior[1, ], decreasing = TRUE)  
+
+```
+The test data(200,0,200) is classified as **`r as.character(test_pre$class)`** using the QDA model.  
+
+The top-1 posterior (pink = 0.554) and top-2 posterior (purple = 0.446) are close, while the other classes have near-zero probability(7.145960e-15, 8.530348e-18, 2.072491e-35). This indicates the point lies near the pink–purple decision boundary.
